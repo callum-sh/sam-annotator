@@ -9,8 +9,12 @@ dependencies = [
     "torch",
     "opencv-python-headless",
     "numpy",
+    "torchvision>=0.26.0",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
