@@ -1,15 +1,18 @@
 [project]
 name = "sam-annotator"
-version = "0.1.0"
+version = "0.2.0"
 description = "SAM-powered bounding box annotation tool for drone-detect ground truth"
 requires-python = ">=3.11"
 dependencies = [
     "gradio>=4.0",
     "segment-anything",
+    "sam2",
     "torch",
     "opencv-python-headless",
     "numpy",
     "torchvision>=0.26.0",
+    "iopath",
+    "hydra-core",
 ]
 
 [build-system]
