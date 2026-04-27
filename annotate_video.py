@@ -361,13 +361,14 @@ class VideoAnnotator:
         points = np.array(all_pts, dtype=np.float32)
         labels = np.array(all_labels, dtype=np.int32)
 
-        _, out_obj_ids, out_mask_logits = self.predictor.add_new_points_or_box(
-            inference_state=self.inference_state,
-            frame_idx=self.frame_idx,
-            obj_id=obj_id,
-            points=points,
-            labels=labels,
-        )
+        with self._autocast():
+            _, out_obj_ids, out_mask_logits = self.predictor.add_new_points_or_box(
+                inference_state=self.inference_state,
+                frame_idx=self.frame_idx,
+                obj_id=obj_id,
+                points=points,
+                labels=labels,
+            )
         self.video_segments.setdefault(self.frame_idx, {})
         for i, oid in enumerate(out_obj_ids):
             self.video_segments[self.frame_idx][int(oid)] = (out_mask_logits[i] > 0.0).cpu().numpy()
