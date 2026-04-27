@@ -225,7 +225,13 @@ class VideoAnnotator:
         self.absent_overrides: dict[str, set[int]] = {t: set() for t in tags}
 
         self._device = device_override or self._pick_device()
-        if self._device == "mps":
+        if self._device == "cuda":
+            print("INFO: CUDA detected. Enabling bfloat16 autocast (SAM 2 default).")
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
+            if torch.cuda.get_device_properties(0).major >= 8:
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+        elif self._device == "mps":
             print(
                 "INFO: MPS detected. Forcing float32 + autocast off to avoid "
                 "SAM 2's known matmul-dtype assertion."
@@ -237,6 +243,8 @@ class VideoAnnotator:
         self.predictor = build_sam2_video_predictor(cfg, str(ckpt), device=self._device)
         if self._device == "mps":
             self.predictor.to(torch.float32)
+        elif self._device == "cuda":
+            self.predictor.to(torch.bfloat16)
         print(
             f"initializing inference state across {len(self.frames)} frames "
             f"(offload_to_cpu={offload_to_cpu})..."
