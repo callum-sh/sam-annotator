@@ -226,8 +226,7 @@ class VideoAnnotator:
 
         self._device = device_override or self._pick_device()
         if self._device == "cuda":
-            print("INFO: CUDA detected. Enabling bfloat16 autocast (SAM 2 default).")
-            torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
+            print("INFO: CUDA detected. Enabling bfloat16 autocast around predictor calls.")
             if torch.cuda.get_device_properties(0).major >= 8:
                 torch.backends.cuda.matmul.allow_tf32 = True
                 torch.backends.cudnn.allow_tf32 = True
@@ -243,8 +242,6 @@ class VideoAnnotator:
         self.predictor = build_sam2_video_predictor(cfg, str(ckpt), device=self._device)
         if self._device == "mps":
             self.predictor.to(torch.float32)
-        elif self._device == "cuda":
-            self.predictor.to(torch.bfloat16)
         print(
             f"initializing inference state across {len(self.frames)} frames "
             f"(offload_to_cpu={offload_to_cpu})..."
@@ -257,6 +254,11 @@ class VideoAnnotator:
         self.dirty = False
 
         self.video_segments: dict[int, dict[int, np.ndarray]] = {}
+
+    def _autocast(self):
+        if self._device == "cuda":
+            return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        return contextlib.nullcontext()
 
     @staticmethod
     def _pick_device() -> str:
@@ -381,13 +383,14 @@ class VideoAnnotator:
 
     def _propagate(self) -> None:
         new_segments: dict[int, dict[int, np.ndarray]] = {}
-        for frame_idx, obj_ids, mask_logits in self.predictor.propagate_in_video(
-            self.inference_state
-        ):
-            new_segments[frame_idx] = {
-                int(obj_id): (mask_logits[i] > 0.0).cpu().numpy()
-                for i, obj_id in enumerate(obj_ids)
-            }
+        with self._autocast():
+            for frame_idx, obj_ids, mask_logits in self.predictor.propagate_in_video(
+                self.inference_state
+            ):
+                new_segments[frame_idx] = {
+                    int(obj_id): (mask_logits[i] > 0.0).cpu().numpy()
+                    for i, obj_id in enumerate(obj_ids)
+                }
         self.video_segments = new_segments
 
     def mark_absent_here(self) -> tuple[np.ndarray, str]:
@@ -412,22 +415,23 @@ class VideoAnnotator:
         return self._render()
 
     def _reapply_all_prompts(self) -> None:
-        for tag, by_frame in self.prompt_points.items():
-            if not by_frame:
-                continue
-            obj_id = self.tag_to_obj_id[tag]
-            for frame_idx, pts in by_frame.items():
-                if not pts:
+        with self._autocast():
+            for tag, by_frame in self.prompt_points.items():
+                if not by_frame:
                     continue
-                points = np.array([[px, py] for px, py, _ in pts], dtype=np.float32)
-                labels = np.array([lab for _, _, lab in pts], dtype=np.int32)
-                self.predictor.add_new_points_or_box(
-                    inference_state=self.inference_state,
-                    frame_idx=frame_idx,
-                    obj_id=obj_id,
-                    points=points,
-                    labels=labels,
-                )
+                obj_id = self.tag_to_obj_id[tag]
+                for frame_idx, pts in by_frame.items():
+                    if not pts:
+                        continue
+                    points = np.array([[px, py] for px, py, _ in pts], dtype=np.float32)
+                    labels = np.array([lab for _, _, lab in pts], dtype=np.int32)
+                    self.predictor.add_new_points_or_box(
+                        inference_state=self.inference_state,
+                        frame_idx=frame_idx,
+                        obj_id=obj_id,
+                        points=points,
+                        labels=labels,
+                    )
 
     def toggle_click_mode(self) -> tuple[np.ndarray, str]:
         self.point_label = 0 if self.point_label == 1 else 1
